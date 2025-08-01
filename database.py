@@ -1,14 +1,26 @@
-import sqlite3
-import os
+import psycopg2
 import pandas as pd
-DB_NAME = os.path.join(os.path.dirname(__file__), "pigskin.db")
+import os
+
+# PostgreSQL 連線參數
+DB_PARAMS = {
+    "host": "postgres.railway.internal",
+    "port": 5432,
+    "user": "postgres",
+    "password": "kWhxZovipjmjFosfdCoraACcnHuiLIkt",
+    "dbname": "railway"
+}
+
+# 建立連線
+def get_connection():
+    return psycopg2.connect(**DB_PARAMS)
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS pigskin (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             date TEXT,
             source TEXT,
             breed TEXT,
@@ -22,9 +34,9 @@ def init_db():
     """)
     conn.commit()
     conn.close()
-    
+
 def get_available_packages():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     c.execute('''
         SELECT id, date, source, pieces, note FROM pigskin
@@ -43,40 +55,39 @@ def get_available_packages():
     ]
     return packages
 
-
 def insert_pigskin_record(date, source, breed, reason, drug, packages, pieces, note):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
-    # 每包都插入一筆資料（實際片數為 6，除非最後一包有特別片數）
     full_packages = packages - 1 if note else packages
     for _ in range(full_packages):
-        c.execute("INSERT INTO pigskin (date, source, breed, reason, drug, pieces, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (date, source, breed, reason, drug, 6, ""))
-    if note:  # 插入不足6片的那一包
-        c.execute("INSERT INTO pigskin (date, source, breed, reason, drug, pieces, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (date, source, breed, reason, drug, pieces, note))
+        c.execute("""
+            INSERT INTO pigskin (date, source, breed, reason, drug, pieces, note)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (date, source, breed, reason, drug, 6, ""))
+    if note:
+        c.execute("""
+            INSERT INTO pigskin (date, source, breed, reason, drug, pieces, note)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (date, source, breed, reason, drug, pieces, note))
     conn.commit()
     conn.close()
 
 def get_total_pieces():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT SUM(pieces) FROM pigskin WHERE used=0")
     total = c.fetchone()[0]
     conn.close()
     return total if total else 0
 
-import pandas as pd
-
 def get_all_records_df():
-    conn = sqlite3.connect(DB_NAME)
-    all_df = pd.read_sql_query("SELECT * FROM pigskin", conn)
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM pigskin", conn)
     conn.close()
-    return all_df
-
+    return df
 
 def get_unused_packages():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id, date, pieces, note FROM pigskin WHERE used=0")
     data = c.fetchall()
@@ -84,15 +95,14 @@ def get_unused_packages():
     return data
 
 def use_package(id, date):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("UPDATE pigskin SET used=1, used_date=? WHERE id=?", (date, id))
+    c.execute("UPDATE pigskin SET used=1, used_date=%s WHERE id=%s", (date, id))
     conn.commit()
     conn.close()
 
 def get_usage_df():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     df = pd.read_sql_query("SELECT * FROM pigskin WHERE used=1", conn)
     conn.close()
     return df
-
